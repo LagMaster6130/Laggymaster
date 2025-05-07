@@ -1,0 +1,172 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+-- UI Setup
+local screenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+screenGui.Name = "FreeCamUI"
+screenGui.ResetOnSpawn = false
+
+-- Toggle button
+local toggleButton = Instance.new("TextButton")
+toggleButton.Text = "Free Cam"
+toggleButton.Size = UDim2.new(0, 120, 0, 50)
+toggleButton.Position = UDim2.new(0, 10, 1, -60)
+toggleButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+toggleButton.TextColor3 = Color3.new(1, 1, 1)
+toggleButton.TextScaled = true
+toggleButton.Parent = screenGui
+
+-- Teleport button (only in Free Cam)
+local teleportButton = Instance.new("TextButton")
+teleportButton.Text = "Teleport"
+teleportButton.Size = UDim2.new(0, 120, 0, 50)
+teleportButton.Position = UDim2.new(0, 140, 1, -60)
+teleportButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+teleportButton.TextColor3 = Color3.new(1, 1, 1)
+teleportButton.TextScaled = true
+teleportButton.Visible = false
+teleportButton.Active = true
+teleportButton.Draggable = true
+teleportButton.Parent = screenGui
+
+-- Joystick base
+local joystickBG = Instance.new("Frame")
+joystickBG.Size = UDim2.new(0, 150, 0, 150)
+joystickBG.Position = UDim2.new(0, 30, 1, -180)
+joystickBG.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+joystickBG.BackgroundTransparency = 0.3
+joystickBG.Visible = false
+joystickBG.Active = true
+joystickBG.Draggable = true
+joystickBG.Parent = screenGui
+
+-- Joystick knob
+local joystick = Instance.new("ImageButton")
+joystick.Size = UDim2.new(0, 90, 0, 90)
+joystick.Position = UDim2.new(0.5, -45, 0.5, -45)
+joystick.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+joystick.BackgroundTransparency = 0.1
+joystick.AutoButtonColor = false
+joystick.ClipsDescendants = true
+joystick.Parent = joystickBG
+
+-- State
+local freeCamEnabled = false
+local moveVector = Vector3.zero
+local rotation = Vector2.zero
+local draggingTouch = nil
+local lastTouchPos
+local speed = 40
+local rotationSpeed = 0.2
+
+-- Toggle Free Cam
+toggleButton.MouseButton1Click:Connect(function()
+	freeCamEnabled = not freeCamEnabled
+	toggleButton.Text = freeCamEnabled and "Exit Cam" or "Free Cam"
+	joystickBG.Visible = freeCamEnabled
+	teleportButton.Visible = freeCamEnabled
+
+	if freeCamEnabled then
+		camera.CameraType = Enum.CameraType.Scriptable
+		local origin = player.Character and player.Character:FindFirstChild("Head") and player.Character.Head.Position or Vector3.new(0, 10, 0)
+		camera.CFrame = CFrame.new(origin + Vector3.new(0, 2, 0))
+	else
+		camera.CameraType = Enum.CameraType.Custom
+	end
+end)
+
+-- Teleport to camera position
+teleportButton.MouseButton1Click:Connect(function()
+	if not freeCamEnabled then return end
+
+	local targetPosition = camera.CFrame.Position
+	local character = player.Character
+	if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+
+	-- Create platform
+	local platform = Instance.new("Part")
+	platform.Size = Vector3.new(6, 1, 6)
+	platform.Position = targetPosition - Vector3.new(0, 3, 0)
+	platform.Anchored = true
+	platform.CanCollide = true
+	platform.Transparency = 0.25
+	platform.BrickColor = BrickColor.new("Bright yellow")
+	platform.Name = "TempPlatform"
+	platform.Parent = workspace
+
+	-- Teleport player
+	character:MoveTo(targetPosition + Vector3.new(0, 3, 0))
+
+	-- Disable Free Cam
+	freeCamEnabled = false
+	toggleButton.Text = "Free Cam"
+	camera.CameraType = Enum.CameraType.Custom
+	joystickBG.Visible = false
+	teleportButton.Visible = false
+
+	-- Remove platform after 3 seconds
+	task.delay(3, function()
+		if platform then platform:Destroy() end
+	end)
+end)
+
+-- Joystick movement
+local joystickTouch = nil
+UserInputService.TouchMoved:Connect(function(input)
+	if input == joystickTouch then
+		local center = joystickBG.AbsolutePosition + joystickBG.AbsoluteSize / 2
+		local offset = Vector2.new(input.Position.X, input.Position.Y) - center
+		local maxVisual = 60
+		local maxActual = 200
+		local visualOffset = offset.Magnitude > maxVisual and offset.Unit * maxVisual or offset
+		joystick.Position = UDim2.new(0.5, visualOffset.X - 45, 0.5, visualOffset.Y - 45)
+		moveVector = Vector3.new(offset.X, 0, offset.Y).Unit * math.clamp(offset.Magnitude / maxActual, 0, 1)
+	end
+end)
+
+UserInputService.TouchEnded:Connect(function(input)
+	if input == joystickTouch then
+		joystickTouch = nil
+		moveVector = Vector3.zero
+		joystick.Position = UDim2.new(0.5, -45, 0.5, -45)
+	end
+	if input == draggingTouch then
+		draggingTouch = nil
+	end
+end)
+
+joystick.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch then
+		joystickTouch = input
+	end
+end)
+
+-- Look rotation
+UserInputService.TouchStarted:Connect(function(input)
+	if freeCamEnabled and input.Position.X > camera.ViewportSize.X * 0.4 and not draggingTouch then
+		draggingTouch = input
+		lastTouchPos = input.Position
+	end
+end)
+
+UserInputService.TouchMoved:Connect(function(input)
+	if draggingTouch == input and lastTouchPos and freeCamEnabled then
+		local delta = input.Position - lastTouchPos
+		lastTouchPos = input.Position
+		rotation = rotation + Vector2.new(-delta.X, -delta.Y) * rotationSpeed
+	end
+end)
+
+-- Camera control loop
+RunService.RenderStepped:Connect(function(dt)
+	if freeCamEnabled then
+		local camRot = CFrame.Angles(0, math.rad(rotation.X), 0) * CFrame.Angles(math.rad(rotation.Y), 0, 0)
+		local moveDir = camRot:VectorToWorldSpace(moveVector)
+		camera.CFrame = camera.CFrame + moveDir * dt * speed
+		camera.CFrame = CFrame.new(camera.CFrame.Position) * camRot
+	end
+end)
