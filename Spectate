@@ -1,0 +1,181 @@
+--// Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+
+--// Variables
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+--// Core GUI Toggle
+local function setCoreUIVisible(visible)
+	pcall(function()
+		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, visible)
+	end)
+end
+
+--// UI Setup
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "SpectatorUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local uiScale = Instance.new("UIScale")
+uiScale.Scale = 1
+uiScale.Parent = screenGui
+
+--// Helper: Create Button
+local function createButton(name, text, anchorPoint, pos)
+	local btn = Instance.new("TextButton")
+	btn.Name = name
+	btn.Text = text
+	btn.Size = UDim2.new(0, 160, 0, 60)
+	btn.Position = pos
+	btn.AnchorPoint = anchorPoint
+	btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	btn.TextColor3 = Color3.new(1, 1, 1)
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 22
+	btn.BorderSizePixel = 0
+	btn.AutoButtonColor = true
+	btn.Active = true
+	btn.Draggable = name == "SpectateBtn"
+	btn.Parent = screenGui
+	return btn
+end
+
+--// UI Elements
+local spectateBtn = createButton("SpectateBtn", "Spectate", Vector2.new(0, 0), UDim2.new(0, 20, 0, 20))
+local prevBtn = createButton("PrevBtn", "< Prev", Vector2.new(0.5, 0.5), UDim2.new(0.2, 0, 1, -180))
+local nextBtn = createButton("NextBtn", "Next >", Vector2.new(0.5, 0.5), UDim2.new(0.8, 0, 1, -180))
+local teleportBtn = createButton("TeleportBtn", "Teleport", Vector2.new(0.5, 0.5), UDim2.new(0.5, 0, 1, -100))
+
+local nameLabel = Instance.new("TextLabel")
+nameLabel.Size = UDim2.new(0, 320, 0, 40)
+nameLabel.Position = UDim2.new(0.5, 0, 0, 80)
+nameLabel.AnchorPoint = Vector2.new(0.5, 0)
+nameLabel.BackgroundTransparency = 0.3
+nameLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+nameLabel.TextColor3 = Color3.new(1, 1, 1)
+nameLabel.Font = Enum.Font.GothamBold
+nameLabel.TextScaled = true
+nameLabel.Visible = false
+nameLabel.Parent = screenGui
+
+-- Hide initially
+for _, btn in pairs({prevBtn, nextBtn, teleportBtn}) do
+	btn.Visible = false
+end
+
+--// Spectate Logic
+local isSpectating = false
+local targetList = {}
+local targetIndex = 1
+local currentTarget = nil
+
+local function refreshTargets()
+	targetList = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("Humanoid") then
+			table.insert(targetList, plr)
+		end
+	end
+end
+
+local function setTarget(index)
+	if #targetList == 0 then
+		currentTarget = nil
+		nameLabel.Text = "No players to spectate."
+		return
+	end
+	targetIndex = ((index - 1) % #targetList) + 1
+	currentTarget = targetList[targetIndex]
+
+	if currentTarget.Character and currentTarget.Character:FindFirstChild("Humanoid") then
+		Camera.CameraType = Enum.CameraType.Custom
+		Camera.CameraSubject = currentTarget.Character.Humanoid
+		nameLabel.Text = "Spectating: " .. currentTarget.Name
+	end
+end
+
+local function stopSpectating()
+	isSpectating = false
+	spectateBtn.Text = "Spectate"
+	for _, btn in pairs({prevBtn, nextBtn, teleportBtn}) do
+		btn.Visible = false
+	end
+	nameLabel.Visible = false
+	setCoreUIVisible(true)
+
+	if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+		Camera.CameraType = Enum.CameraType.Custom
+		Camera.CameraSubject = LocalPlayer.Character.Humanoid
+	end
+end
+
+--// Button Events
+spectateBtn.MouseButton1Click:Connect(function()
+	if not isSpectating then
+		refreshTargets()
+		if #targetList == 0 then
+			spectateBtn.Text = "No Players"
+			task.delay(2, function()
+				if not isSpectating then spectateBtn.Text = "Spectate" end
+			end)
+			return
+		end
+		isSpectating = true
+		spectateBtn.Text = "Stop"
+		for _, btn in pairs({prevBtn, nextBtn, teleportBtn}) do
+			btn.Visible = true
+		end
+		nameLabel.Visible = true
+		setCoreUIVisible(false)
+		setTarget(1)
+	else
+		stopSpectating()
+	end
+end)
+
+prevBtn.MouseButton1Click:Connect(function()
+	setTarget(targetIndex - 1)
+end)
+
+nextBtn.MouseButton1Click:Connect(function()
+	setTarget(targetIndex + 1)
+end)
+
+teleportBtn.MouseButton1Click:Connect(function()
+	if not (currentTarget and currentTarget.Character and currentTarget.Character:FindFirstChild("HumanoidRootPart")) then return end
+
+	local targetPos = currentTarget.Character.HumanoidRootPart.Position
+	local platform = Instance.new("Part")
+	platform.Size = Vector3.new(6, 1, 6)
+	platform.Anchored = true
+	platform.CanCollide = true
+	platform.Transparency = 0.5
+	platform.Position = targetPos - Vector3.new(0, 3, 0)
+	platform.Name = "TempTeleportPlatform"
+	platform.Parent = workspace
+
+	local char = LocalPlayer.Character
+	if char and char:FindFirstChild("HumanoidRootPart") then
+		char:SetPrimaryPartCFrame(CFrame.new(platform.Position + Vector3.new(0, 4, 0)))
+	end
+
+	task.delay(3, function()
+		if platform and platform.Parent then
+			platform:Destroy()
+		end
+	end)
+
+	stopSpectating()
+end)
+
+--// Ensure default camera setup on script start
+if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+	Camera.CameraType = Enum.CameraType.Custom
+	Camera.CameraSubject = LocalPlayer.Character.Humanoid
+end
